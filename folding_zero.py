@@ -674,6 +674,19 @@ def optimize_net(nnet, traindata):
     if len(traindata) >= 256:
         trainset = random.sample(traindata, 256)
         optimizer = optim.SGD(nnet.parameters(), lr=0.001, momentum=0.9, weight_decay=0.00004)
+
+        #for batch input
+        """
+        batch = trainset[0].tensor
+        batch = batch.view(-1, 17, 32, 32)
+        for i in range(1, 256):
+            tensor = trainset[i].tensor
+            tensor.view(-1, 17, 32, 32)
+            batch = torch.cat((batch, tensor), 3)
+        optimizer.zero_grad()
+        out_pi, out_v = nnet(state.tensor)
+        loss_pi = nn.MSELoss(out_pi, )
+        """
         for state in trainset:
             optimizer.zero_grad()
 

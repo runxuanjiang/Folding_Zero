@@ -6,18 +6,25 @@ import numpy as np
 
 import math
 import random
-import matplotlib
-import matplotlib.pyplot as plt
+
+#TODO: Once all bugs are fixed, create different files for different classes
+
+#import matplotlib
+#import matplotlib.pyplot as plt
+#TODO: For some reason matpotlib.pyplot doesn't work on WSL (Windows Subsystem for Linux), need to resolve issue
 
 import pdb
 
-import sys
-sys.stdout = open("fzero.txt", "a+")
+"""import sys
+sys.stdout = open("fzerosingle.txt", "a+")"""
 
 
 
-#Framework for folding proteins
+#############################################################
 
+#Framework for folding proteins with fixed board size (32x32)
+
+#############################################################
 class FoldFramework():
     
     def __init__(self, sequence):
@@ -47,7 +54,7 @@ class FoldFramework():
     def collision(self):
         self.done = True
         self.reward = -1000
-        print("Finished, collision")
+        if Debug: print("Finished, collision")
 
     def left(self, add):
         if (self.pos[1] == 0):
@@ -138,7 +145,7 @@ class FoldFramework():
 
     def steptest(self, move): #Move: -1 for left, 0 for straight, 1 for right
         if (self.done):
-            #print("Folding finished, please reset")
+            print("Folding finished, please reset")
             return False
         if (self.direction == 0):
             if (move == -1):
@@ -174,7 +181,7 @@ class FoldFramework():
 
     def step(self, move): #Move: -1 for left, 0 for straight, 1 for right
         if (self.done):
-            #print("Folding finished, please reset")
+            print("Folding finished, please reset")
             return (self.board, self.reward, self.done)
         add = 1
         if (self.sequence[self.index] == 'P'):
@@ -216,9 +223,11 @@ class FoldFramework():
              self.updateH()
         if (self.index == len(self.sequence) - 1):
             self.done = True
-            print("Folding Complete")
+            if Debug: print("Folding Complete")
         self.index += 1
         return (self.board, self.reward, self.done)
+
+#Folding environment for variable board size (not 32x32)
 """
 class FoldFramework():
 
@@ -346,30 +355,14 @@ class FoldFramework():
         return (self.board, self.reward, self.done)
 """
 
+##########################################################
+#Architecture for Neural Net - 
+#20 Stacked Residual blocks followed by
+#two output heads. Pi output is a 3x1 vector and v output
+# is a scalar
+##########################################################
 
-#function that converts a board to a tensor
-def board2tensor(board):
-    h = torch.zeros(board.shape)
-    p = torch.zeros(board.shape)
-    c = torch.zeros(board.shape)
-    b = torch.zeros(board.shape)
-    for i in range(board.shape[0]):
-        for j in range(board.shape[0]):
-            if (board[i][j] == 1):
-                h[i][j] = 1
-            elif board[i][j] == 2:
-                p[i][j] = 1
-            elif board[i][j] == 3:
-                c[i][j] = 1
-            elif board[i][j] == 4:
-                b[i][j] = 1
-    h = h.view(32, 32, 1)
-    p = p.view(32, 32, 1)
-    c = c.view(32, 32, 1)
-    b = b.view(32, 32, 1)
-    out = torch.cat((h, p, c, b),2)
-    return out
-
+#First residual block for the neural net
 class FirstResBlock(nn.Module):
     def __init__(self):
         super(FirstResBlock, self).__init__()
@@ -399,6 +392,7 @@ class ResBlock(nn.Module):
         y += x
         return y
 
+#Neural Network to be used in the model
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
@@ -427,27 +421,19 @@ class Net(nn.Module):
         return nn.Sequential(*layers)
 
 
-        
-"""
-def train():
-    out_pi, out_v = the_net(board)
-    loss_pi = losspi(out_pi)
-    loss_v = lossv(out_v)
-    total_loss = loss_pi + loss_v
-optimizer = optim.SGD(the_net.parameters(), lr=0.001, momentum = 0.9, weight_decay=0.00004)
+###################################################
+#Implementation of Monte Carl Search Tree
+###################################################
 
-def lossv = nn.MSELoss()
-def losspi = nn.CrossEntropyLoss
 
-"""
-
+#Node and State are utility classes for the search tree and for training the model, respectively
 class Node():
     def __init__(self, p, parent = None):
         self.n = 0
         self.w = 0
         self.q = 0
         self.p = p
-        self.children = []
+        self.children = [] #Should always contain either 0 or 3 elements, index 0 is left, index 1 is straight, index 2 is right
         self.parent = parent
 
 class State():
@@ -482,12 +468,19 @@ class Tree():
     def run(self):
         while len(self.snode.children) > 0:
             while (self.snode.children[0].n + self.snode.children[1].n + self.snode.children[2].n < 300):
+                if Debug: print("Current tree search number: ", self.snode.children[0].n + self.snode.children[1].n + self.snode.children[2].n)
                 self.selection()
             temp = [self.snode.children[0].n, self.snode.children[1].n, self.snode.children[2].n]
             ttemp = [x / 300 for x in temp]
             self.pis.append(ttemp)
             self.moves.append(temp.index(max(temp)) - 1)
             self.snode = self.snode.children[temp.index(max(temp))]
+            if Debug: 
+                print("Current node id:", len(self.moves) + 1)
+                print("Current Moveset:")
+                for move in self.moves:
+                    print(move, end=" ")
+                print()
         self.env.reset()
         tempboard, _, _ = self.env.step(self.moves[0])
         for i in range(1, len(self.moves)):
@@ -495,7 +488,8 @@ class Tree():
             tempboard, _, _ = self.env.step(self.moves[i])
         ans = []
         for i in range(len(self.finalstates)):
-            addans = State(self.get_input(i + 1, self.finalstates), self.pis[i], self.env.reward)
+            databoard = self.get_input(i+1, self.finalstates)
+            addans = State(databoard, self.pis[i], self.env.reward)
             ans.append(addans)
         return ans, self.env.reward, self.env.board
 
@@ -528,11 +522,11 @@ class Tree():
                 addnode = Node(pi, parent = self.cnode)
                 self.cnode.children.append(addnode)
             if not self.env.steptest(-1):
-                self.cnode.children[0].p = -1000
+                self.cnode.children[0].p = -20000
             if not self.env.steptest(0):
-                self.cnode.children[1].p = -1000
+                self.cnode.children[1].p = -20000
             if not self.env.steptest(1):
-                self.cnode.children[2].p = -1000
+                self.cnode.children[2].p = -20000
         self.backprop(val, done = False)
 
     def backprop(self, v, done):
@@ -579,96 +573,63 @@ class Tree():
         return 2*min(odds, evens)
 
 
-"""
-    
-class Train():
-    def __init__(self, seq, nnet):
-        self.env = FoldFramework(seq)
-        self.nnet = nnet
-        self.seq = seq
-        self.rupper = self.calc_rupper()
-        self.treehead = Node(p = 1)
-        self.treecurr = self.treehead
-        self.totalstates = []
-        self.currentstates = []
-        self.board, self.reward, self.done = self.env.reset()
+#################################################
+#Utility and Training Functions:
+#################################################
+
+#function that converts a board to a tensor
+def board2tensor(board):
+    h = torch.zeros(board.shape)
+    p = torch.zeros(board.shape)
+    c = torch.zeros(board.shape)
+    b = torch.zeros(board.shape)
+    for i in range(board.shape[0]):
+        for j in range(board.shape[0]):
+            if (board[i][j] == 1):
+                h[i][j] = 1
+            elif board[i][j] == 2:
+                p[i][j] = 1
+            elif board[i][j] == 3:
+                c[i][j] = 1
+            elif board[i][j] == 4:
+                b[i][j] = 1
+    h = h.view(32, 32, 1)
+    p = p.view(32, 32, 1)
+    c = c.view(32, 32, 1)
+    b = b.view(32, 32, 1)
+    out = torch.cat((h, p, c, b),2)
+    return out
 
 
-    def learn(self):
-        while (not self.done):
-            self.selection()
-        self.backprop()
+def pi_loss_func(targets, outputs):
+    return -torch.sum(targets*torch.log(outputs))
+v_loss_func = nn.MSELoss(reduction = "none")
+def optimize_debug(nnet, inputstates):
+    print("training...")
+    optimizer = optim.SGD(nnet.parameters(), lr=0.001, momentum=0.9, weight_decay=0.00004)
+    for state in inputstates:
+        print(state.tensor)
+        print(state.pi)
+        print(state.v)
+        optimizer.zero_grad()
 
-
-    def calc_rupper(self):
-        odds = 0
-        evens = 0
-        for i in range(len(self.seq)):
-            if (seq[i-1] == 'H' and i % 2 == 0):
-                evens += 1
-            elif (seq[i-1] == 'H' and i%2 == 1):
-                odds += 1
-        return 2*min(odds, evens)
-        
-
-    def selection(self):
-        addstate = State(self.board)
-        currentstates.append(addstate)
-        if (len(self.treecurr.children) == 0):
-            inp = make_input(self.env.index)
-            with torch.no_grad():
-                pivar, _ = self.nnet(inp)
-                for i in pivar:
-                    addnode = Node(i)
-                    self.treecurr.children.emplace(addnode)
-
-
-    def expansion():
-
-
-    def backprop():
-
-    def makeinput(self, id):
-        first = torch.empty(32, 32)
-        if (id < 4):
-            first = torch.zeros(32, 32, 4 * (4 - id))
-            for i in range(id):
-                first = torch.cat((first, board2tensor(currentstates[i])), 3)
-        else:
-            first = board2tensor(currentstates[id - 4])
-            for i in range(id - 3, id):
-                first = torch.cat((first, board2tensor(currentstates[i])), 3)
-        if (self.seq[id] == 'H'):
-            torch.cat((first, torch.ones(32, 32, 1)), 3)
-        else:
-            torch.cat((first, torch.zeros(32, 32, 1)), 3)
-        return first
-
-"""
-
-       
+        out_pi, out_v = nnet(state.tensor)
+        state.v = torch.tensor([state.v], dtype=torch.float)
+        state.pi = torch.tensor(state.pi, dtype=torch.float)
+        loss_v = v_loss_func(out_v, state.v)
+        print(out_pi)
+        print(state.pi)
+        loss_pi = pi_loss_func(out_pi, state.pi)
+        total_loss = loss_v + loss_pi
+        total_loss.backward()
+        optimizer.step()
 
 
 
 
-"""
-np.random.seed(42)
-
-seq = 'HHPHH'
-env = FoldFramework(seq)
-action_space = [-1, 0, 1]
-board, reward, done = env.reset()
-print(board)
-print()
-
-for i in range(5):
-    action = random.choice(action_space)
-    board, reward, done = env.step(action)
-    print(board)
-    print()
-
-"""
-
+#TODO: Bugs in this function:
+#Including the loss function syntax is incorrect and
+#cannot use append when updating the traindata list (use + instead)
 def optimize_net(nnet, traindata):
     print("training...")
     if len(traindata) >= 256:
@@ -687,6 +648,9 @@ def optimize_net(nnet, traindata):
         out_pi, out_v = nnet(state.tensor)
         loss_pi = nn.MSELoss(out_pi, )
         """
+
+        #for single input
+        
         for state in trainset:
             optimizer.zero_grad()
 
@@ -697,17 +661,18 @@ def optimize_net(nnet, traindata):
 
             total_loss.backward()
             optimizer.step()
+        
 
+######################################################
+#Main instructions
+######################################################
 
+Debug = True #If true, prints out extra status indicators to console while running
 
-
-currnet = Net()
-prevnet = Net()
-count = 0
-traindata = []
-maxes = []
-for _ in range(15):
-    maxes.append(0)
+board = None #board to be printed to console
+net = Net() #Neural Net
+traindata = [] # Array containing states to train the model
+maxe = 0 #Maximum score reached
 sequences = ["HHPPPPPHHPPPHPPPHP",
 "HPHPHHHPPPHHHHPPHH",
 "PHPPHPHHHPHHPHHHHH",
@@ -724,30 +689,36 @@ sequences = ["HHPPPPPHHPPPHPPPHP",
 "PPPPPPHPHHPPPPPHHHPHHHHHPHHPPPPHHPPHHPHHHHHPHHHHHHHHHHPHHPHHHHHHHPPPPPPPPPPPHHHHHHHPPHPHHHPPPPPPHPHH",
 "PPPHHPPHHHHPPHHHPHHPHHPHHHHPPPPPPPPHHHHHHPPHHHHHHPPPPPPPPPHPHHPHHHHHHHHHHHPPHHHPHHPHPPHPHHHPPPPPPHHH"]
 
-np.set_printoptions(precision=3)
+np.set_printoptions(precision=2)
 np.set_printoptions(suppress=True)
+
+seq = "HHPH"#sequences[0] #change this number depending on which sequence to run
 for _ in range(2000):
-    for i in range(len(sequences)):
-        count += 1
-        if (count % 1000 == 0):
-            seq = random.choice(sequences)
-            env = FoldFramework(seq)
-            mcst1 = Tree(env, currnet, seq)
-            mcst2 = Tree(env, prevnet, seq)
-            _, score1, _ = mcst1.run()
-            _, score2, _ = mcst2.run()
-            if (score1 >= score2):
-                prevnet = currnet
-            else:
-                currnet = prevnet
-        env = FoldFramework(sequences[i])
-        mcst = Tree(env, currnet, sequences[i])
-        newdata, score, brd = mcst.run()
-        maxes[i] = max(maxes[i], score)
-        traindata.append(newdata)
-        optimize_net(currnet, traindata)
-        print(maxes)
-        for row in enumerate(brd):
+    if Debug:
+        env = FoldFramework(seq)
+        mcst = Tree(env, net, seq)
+        newdata, score, newboard = mcst.run()
+        if score >= maxe:
+            maxe = score
+            board = newboard
+        optimize_debug(net, newdata)
+        print("Score this run: ", score)
+        for row in enumerate(newboard):
             print(row)
+    else:
+        env = FoldFramework(seq)
+        mcst = Tree(env, net, seq)
+        newdata, score, newboard = mcst.run()
+        if score >= maxe:
+            maxe = score
+            board = newboard
+        traindata.append(newdata)
+        optimize_net(net, traindata)
+
+    print("Current Maximum Score: ", maxe)
+    for row in enumerate(board):
+        print(row)
+
+
 
     

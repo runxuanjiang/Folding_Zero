@@ -18,6 +18,11 @@ import pdb
 """import sys
 sys.stdout = open("fzerosingle.txt", "a+")"""
 
+np.set_printoptions(precision=3)
+np.set_printoptions(suppress=True)
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 
 #############################################################
@@ -362,7 +367,90 @@ class FoldFramework():
 # is a scalar
 ##########################################################
 
+####################################################
+#2.0 Implementation of neural network
+####################################################
+
+class Expand(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv = nn.Conv2d(17, 128, 3, padding = 1)
+        self.bn = nn.BatchNorm2d(128)
+    
+    def forward(self, x):
+        x = x.view(-1, 17, 32, 32)
+        x = self.bn(self.conv(x))
+        return x
+
+class ResidualBlock(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1 = nn.Conv2d(128, 128, 3, padding=1)
+        self.conv2 = nn.Conv2d(128, 128, 3, padding=1)
+        self.bn1 = nn.BatchNorm2d(128)
+        self.bn2 = nn.BatchNorm2d(128)
+
+
+    def forward(self, x):
+        y = F.relu(self.bn1(self.conv1(x)))
+        y = self.bn2(self.conv2(x))
+        y.add_(x)
+        y = F.relu(y)
+        return y
+
+class Net(nn.Module):
+    def __init__(self):
+        super(Net, self).__init__()
+
+        self.rblayers = self.layer_blocks()
+        self.conv1 = nn.Conv2d(128, 1, 1)
+        self.conv2 = nn.Conv2d(128, 1, 1)
+        self.fc1 = nn.Linear(1024, 3)
+        self.fc2 = nn.Linear(1024, 1)
+        self.softmax = nn.Softmax(dim=0)
+
+    def forward (self, x):
+        print("STARTING TEST OF NEURAL NET")
+        print("#############################################")
+        print("#############################################")
+        print(x)
+        x = self.rblayers(x)
+        print()
+        print(x)
+        pi = self.conv1(x)
+        v = self.conv2(x)
+        print()
+        print("pi:", pi)
+        print("v:", v)
+        print()
+        pi = pi.view(-1, 32*32)#CHANGE
+        v = pi.view(-1, 32*32)
+        pi = self.fc1(pi)
+        v = self.fc2(v)
+        print()
+        print("pi:", pi)
+        print("v:", v)
+        print()
+        print("END OF TEST OF NEURAL NET")
+        print("#############################################")
+        print("#############################################")
+        return self.softmax(pi), torch.tanh(v)
+    
+    def layer_blocks(self):
+        layers = []
+        layers.append(Expand())
+        for _ in range(19):
+            layers.append(ResidualBlock())
+        print("layers: ")
+        print(nn.Sequential(*layers))
+        return nn.Sequential(*layers)
+
+
+####################################################
+#1.0 Implementation of neural network
+####################################################
 #First residual block for the neural net
+"""
 class FirstResBlock(nn.Module):
     def __init__(self):
         super(FirstResBlock, self).__init__()
@@ -375,7 +463,7 @@ class FirstResBlock(nn.Module):
         x = x.view(-1, 17, 32, 32)
         x = F.relu(self.bn1(self.conv1(x)))
         y = F.relu(self.bn2(self.conv2(x)))
-        y += x
+        #y = y.add(x)
         return y
 
 class ResBlock(nn.Module):
@@ -389,7 +477,7 @@ class ResBlock(nn.Module):
     def forward(self, x):
         y = F.relu(self.bn1(self.conv1(x)))
         y = F.relu(self.bn2(self.conv2(x)))
-        y += x
+        #y = y.add(x)
         return y
 
 #Neural Network to be used in the model
@@ -401,17 +489,39 @@ class Net(nn.Module):
         self.conv2 = nn.Conv2d(128, 1, 1)
         self.fc1 = nn.Linear(1024, 3)
         self.fc2 = nn.Linear(1024, 1)
+        self.softmax = nn.Softmax(dim=0)
 
     def forward (self, x):
+        print("STARTING TEST OF NEURAL NET")
+        print("#############################################")
+        print("#############################################")
+        print(x)
         x = self.rblayers(x)
+        print()
+        print(x)
         pi = self.conv1(x)
         v = self.conv2(x)
+        print()
+        print("pi:", pi)
+        print("v:", v)
+        print()
 
         pi = pi.view(32*32)
         v = pi.view(32*32)
+        print("pi:", pi)
+        print("v:", v)
+        print()
         pi = self.fc1(pi)
         v = self.fc2(v)
-        return F.softmax(pi, dim=0), torch.tanh(v)
+        print("pi:", pi)
+        print("v:", v)
+        print()
+        print("finalpi", self.softmax(pi))
+        print("finalv", torch.tanh(v))
+        print("END OF TEST OF NEURAL NET")
+        print("#############################################")
+        print("#############################################")
+        return self.softmax(pi), torch.tanh(v)
     
     def layer_blocks(self):
         layers = []
@@ -419,6 +529,7 @@ class Net(nn.Module):
         for _ in range(19):
             layers.append(ResBlock())
         return nn.Sequential(*layers)
+"""
 
 
 ###################################################
@@ -457,12 +568,13 @@ class Tree():
         self.finalstates = [self.board]
         self.boards = [self.board]
         with torch.no_grad():
-            pitemp, _ = nnet(self.get_input(1, self.boards))
-            #m = Dirichlet(pitemp)
-            #pitemp = m.sample()
-        for pi in pitemp:
-            addnode = Node(pi, parent = self.cnode)
-            self.cnode.children.append(addnode)
+            pitemp, _ = self.nnet(self.get_input(1, self.boards))
+            m = torch.distributions.Dirichlet(pitemp)
+            pitemp = m.sample()
+            pitemp = pitemp.view(3)
+            for pi in pitemp:
+                addnode = Node(pi, parent = self.cnode)
+                self.cnode.children.append(addnode)
     
     #returns a numpy array of states to add to training set from the search tree
     def run(self):
@@ -516,6 +628,8 @@ class Tree():
     def expansion(self):
         with torch.no_grad():
             probs, val = self.nnet(self.get_input(self.env.index, self.boards))
+            probs = probs.view(3)
+            val = val.view(1)
             #m = Dirichlet(probs)
             #probs = m.sample()
             for pi in probs:
@@ -542,17 +656,17 @@ class Tree():
         if (id < 4):
             first = board2tensor(arr[id - 1])
             for i in range(id - 2, -1, -1):
-                first = torch.cat((first, board2tensor(arr[i])), 2)
+                first = torch.cat((first, board2tensor(arr[i])), 0)
             for i in range(0, 4 - id):
-                first = torch.cat((first, torch.zeros(32, 32, 4)), 2)
+                first = torch.cat((first, torch.zeros(4, 32, 32)), 0)
         else:
             first = board2tensor(arr[id - 1])
             for i in range(id - 2, id - 5, -1):
-                first = torch.cat((first, board2tensor(arr[i])), 2)
+                first = torch.cat((first, board2tensor(arr[i])), 0)
         if (self.seq[id - 1] == 'P'):
-            first = torch.cat((first, torch.zeros(32, 32, 1)), 2)
+            first = torch.cat((first, torch.zeros(1, 32, 32)), 0)
         else:
-            first = torch.cat((first, torch.ones(32, 32, 1)), 2)
+            first = torch.cat((first, torch.ones(1, 32, 32)), 0)
         return first
 
     def selector(self, node):
@@ -579,50 +693,75 @@ class Tree():
 
 #function that converts a board to a tensor
 def board2tensor(board):
-    h = torch.zeros(board.shape)
-    p = torch.zeros(board.shape)
-    c = torch.zeros(board.shape)
-    b = torch.zeros(board.shape)
-    for i in range(board.shape[0]):
-        for j in range(board.shape[0]):
-            if (board[i][j] == 1):
-                h[i][j] = 1
-            elif board[i][j] == 2:
-                p[i][j] = 1
-            elif board[i][j] == 3:
-                c[i][j] = 1
-            elif board[i][j] == 4:
-                b[i][j] = 1
-    h = h.view(32, 32, 1)
-    p = p.view(32, 32, 1)
-    c = c.view(32, 32, 1)
-    b = b.view(32, 32, 1)
-    out = torch.cat((h, p, c, b),2)
+    h = torch.from_numpy((board == 1).astype(int)).float()
+    p = torch.from_numpy((board == 2).astype(int)).float()
+    c = torch.from_numpy((board == 3).astype(int)).float()
+    b = torch.from_numpy((board == 4).astype(int)).float()
+    h = h.view(1, 32, 32)
+    p = p.view(1, 32, 32)
+    c = c.view(1, 32, 32)
+    b = b.view(1, 32, 32)
+    out = torch.cat((h, p, c, b),0)
     return out
 
 
-def pi_loss_func(targets, outputs):
-    return -torch.sum(targets*torch.log(outputs))
-v_loss_func = nn.MSELoss(reduction = "none")
+def pi_loss_func(outputs, targets): #CHANGE
+    out = -1*torch.sum(targets[0] * torch.log(torch.clamp(outputs[0], 1e-15, 1)))
+    for i in range(1, len(outputs)):
+        out.add_(-1*torch.sum(targets[i] * torch.log(torch.clamp(outputs[i], 1e-15, 1))))
+    """outputs = torch.clamp(outputs, 1e-15, 1)
+    return -1 * torch.sum(targets*torch.log(outputs))"""
+    return out
+v_loss_func = nn.MSELoss(reduction = "sum")
+
 def optimize_debug(nnet, inputstates):
     print("training...")
     optimizer = optim.SGD(nnet.parameters(), lr=0.001, momentum=0.9, weight_decay=0.00004)
-    for state in inputstates:
-        print(state.tensor)
-        print(state.pi)
-        print(state.v)
+    trainset = inputstates
+    """for state in inputstates:
+        #print(state.tensor)
+        print("state.pi:",state.pi)
+        print("state.v:", state.v)
         optimizer.zero_grad()
 
         out_pi, out_v = nnet(state.tensor)
         state.v = torch.tensor([state.v], dtype=torch.float)
         state.pi = torch.tensor(state.pi, dtype=torch.float)
-        loss_v = v_loss_func(out_v, state.v)
-        print(out_pi)
+        print("out_pi:", out_pi)
+        print("out_v:", out_v)
         print(state.pi)
+        print(state.v)
+        loss_v = v_loss_func(out_v, state.v)
         loss_pi = pi_loss_func(out_pi, state.pi)
+        print("loss_pi:", loss_pi)
+        print("loss_v:", loss_v)
         total_loss = loss_v + loss_pi
+        print("total:", total_loss)
         total_loss.backward()
-        optimizer.step()
+        optimizer.step()"""
+
+
+        
+    inputTensors = trainset[0].tensor.view(-1, 32, 32, 17)
+    vLabels = torch.tensor([trainset[0].v], dtype=torch.float).view(-1, 1)
+    piLabels = torch.tensor(trainset[0].pi, dtype=torch.float).view(-1, 3)
+
+    for it in range(1, len(trainset)):
+        inputTensors = torch.cat((inputTensors, trainset[it].tensor.view(-1, 32, 32, 17)), 0)
+        vLabels = torch.cat((vLabels, torch.tensor([trainset[it].v], dtype = torch.float).view(-1, 1)), 0)
+        piLabels = torch.cat((piLabels, torch.tensor(trainset[it].pi, dtype=torch.float).view(-1, 3)), 0)
+
+    inputTensors = inputTensors.to(device)
+    vLabels = vLabels.to(device)
+    piLabels = piLabels.to(device)
+
+    out_pi, out_v = nnet(inputTensors)
+    loss_v = v_loss_func(out_v, vLabels)
+    loss_pi = pi_loss_func(out_pi, piLabels)
+    total_loss = loss_v + loss_pi
+    total_loss.backward()
+
+    optimizer.step()
 
 
 
@@ -669,8 +808,10 @@ def optimize_net(nnet, traindata):
 
 Debug = True #If true, prints out extra status indicators to console while running
 
+
 board = None #board to be printed to console
 net = Net() #Neural Net
+net = net.to(device)
 traindata = [] # Array containing states to train the model
 maxe = 0 #Maximum score reached
 sequences = ["HHPPPPPHHPPPHPPPHP",
@@ -689,10 +830,7 @@ sequences = ["HHPPPPPHHPPPHPPPHP",
 "PPPPPPHPHHPPPPPHHHPHHHHHPHHPPPPHHPPHHPHHHHHPHHHHHHHHHHPHHPHHHHHHHPPPPPPPPPPPHHHHHHHPPHPHHHPPPPPPHPHH",
 "PPPHHPPHHHHPPHHHPHHPHHPHHHHPPPPPPPPHHHHHHPPHHHHHHPPPPPPPPPHPHHPHHHHHHHHHHHPPHHHPHHPHPPHPHHHPPPPPPHHH"]
 
-np.set_printoptions(precision=2)
-np.set_printoptions(suppress=True)
-
-seq = "HHPH"#sequences[0] #change this number depending on which sequence to run
+seq = "HHPHH" #change this number depending on which sequence to run
 for _ in range(2000):
     if Debug:
         env = FoldFramework(seq)
